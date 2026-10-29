@@ -1,0 +1,79 @@
+# Executor do board (crypto#1135, design D1/D3/D4). Mora no repo do executor, em .github/workflows/portao.yml.
+# Só este workflow tem o token que escreve no Project 1 (secret PORTAO_TOKEN do environment `portao`, só `main`).
+# Roda o código e a FSM do crypto no SHA do arquivo PIN; trocar o PIN exige PR aprovado pelo Alan.
+name: portao
+
+# O cliente da VM acha o run pelo request_id no título; o executor acha os runs do card pelo prefixo "portao #<card> ".
+run-name: "portao #${{ github.event.client_payload.card }} ${{ github.event.client_payload.evento }} ${{ github.event.client_payload.request_id }}"
+
+on:
+  repository_dispatch:
+    types: [portao]
+
+permissions:
+  contents: read
+  actions: read # listar os runs anteriores e baixar o artefato `registro` (digest do T5, /cancelar pendente)
+
+# Dois pedidos do mesmo card nunca se cruzam. Atenção: o GitHub guarda só um pendente por grupo; um terceiro pedido
+# cancela o pendente anterior, e o cliente desse pedido recebe `executor:indisponivel` (visível, nada se move).
+concurrency:
+  group: portao-card-${{ github.event.client_payload.card }}
+  cancel-in-progress: false
+
+jobs:
+  executar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: portao
+    steps:
+      - name: Ler o PIN
+        uses: actions/checkout@v4
+        with:
+          path: executor
+          persist-credentials: false
+
+      - name: Conferir o PIN
+        id: pin
+        run: |
+          sha="$(tr -d '[:space:]' < executor/PIN)"
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "PIN inválido: precisa ser um SHA completo de 40 caracteres do crypto" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout do crypto no PIN
+        uses: actions/checkout@v4
+        with:
+          repository: oalansilva/crypto
+          ref: ${{ steps.pin.outputs.sha }}
+          path: crypto
+          persist-credentials: false
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependências
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      # O pedido entra só pelo arquivo do evento; nada do client_payload é interpolado em comando.
+      - name: Executar o pedido
+        env:
+          PORTAO_TOKEN: ${{ secrets.PORTAO_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PORTAO_LEI_SHA: ${{ steps.pin.outputs.sha }}
+          PORTAO_LEI_REPO: crypto
+        run: python3 crypto/scripts/process-fsm/portao/executor.py --evento "$GITHUB_EVENT_PATH" --saida registro.json
+
+      # O registro é a resposta que o cliente da VM espera e a memória dos runs seguintes. O `/aprovar-design`
+      # procura o digest do T5 nos registros: aprovação depois da retenção é recusada (reenviar com T6 + T5).
+      - name: Guardar o registro
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registro
+          path: registro.json
+          if-no-files-found: ignore
+          retention-days: 90
