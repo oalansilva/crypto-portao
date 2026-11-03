@@ -49,6 +49,8 @@ jobs:
           ref: ${{ steps.pin.outputs.sha }}
           path: crypto
           persist-credentials: false
+          # O crypto é privado; CRYPTO_TOKEN (environment `portao`) só lê o conteúdo dele.
+          token: ${{ secrets.CRYPTO_TOKEN }}
 
       - name: Python
         uses: actions/setup-python@v5
