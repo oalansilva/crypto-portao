@@ -16,8 +16,11 @@ permissions:
 
 # Dois pedidos do mesmo card nunca se cruzam. Atenção: o GitHub guarda só um pendente por grupo; um terceiro pedido
 # cancela o pendente anterior, e o cliente desse pedido recebe `executor:indisponivel` (visível, nada se move).
+# O `v2` no nome é de 10/11/2026: o run 42670140125 (#1192) ficou preso em `waiting` no incidente do GitHub Actions
+# de 09/11, a API recusou cancelar e apagar, e no grupo antigo todo pedido do card esperava atrás dele.
+# Se outro run ficar preso assim, trocar o sufixo solta a fila.
 concurrency:
-  group: portao-card-${{ github.event.client_payload.card }}
+  group: portao-card-v2-${{ github.event.client_payload.card }}
   cancel-in-progress: false
 
 jobs:
